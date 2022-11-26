@@ -176,6 +176,13 @@ impl ChannelState {
                         self.scroll_offset += 1;
                     }
                 }
+                /// Maximum number of decoded line strings to keep buffered for UI display
+                /// TODO: make this a configuration setting
+                const MAXLINES: usize = 3000;
+                let lines = self.messages.len();
+                if lines > MAXLINES {
+                    self.messages = self.messages.split_off(lines - MAXLINES);
+                }
             }
             // defmt output is later formatted into strings in [App::render].
             DataFormat::BinaryLE | DataFormat::Defmt => {
