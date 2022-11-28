@@ -3,6 +3,7 @@ use std::fmt;
 use chrono::Local;
 use probe_rs::Core;
 use probe_rs_rtt::{ChannelMode, DownChannel, UpChannel};
+use std::fmt::write;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DataFormat {
@@ -125,7 +126,11 @@ impl ChannelState {
     /// Polls the RTT target for new data on the specified channel.
     ///
     /// Processes all the new data and adds it to the linebuffer of the respective channel.
-    pub fn poll_rtt(&mut self, core: &mut Core) {
+    pub fn poll_rtt(
+        &mut self,
+        core: &mut Core,
+        defmt_state: &Option<(defmt_decoder::Table, Option<defmt_decoder::Locations>)>,
+    ) {
         // TODO: Proper error handling.
         let count = if let Some(channel) = self.up_channel.as_mut() {
             match channel.read(core, self.rtt_buffer.0.as_mut()) {
@@ -177,9 +182,41 @@ impl ChannelState {
                     }
                 }
             }
+            DataFormat::BinaryLE => {
+                self.messages
+                    .push(self.data.iter().fold(String::new(), |mut output, byte| {
+                        let _ = write(&mut output, format_args!("{:#04x}, ", byte));
+                        output
+                    }));
+            }
             // defmt output is later formatted into strings in [App::render].
-            DataFormat::BinaryLE | DataFormat::Defmt => {
+            DataFormat::Defmt => {
                 self.data.extend_from_slice(&self.rtt_buffer.0[..count]);
+                let (table, locs) = defmt_state.as_ref().expect(
+                    "Running rtt in defmt mode but table or locations could not be loaded.",
+                );
+                let mut stream_decoder = table.new_stream_decoder();
+                stream_decoder.received(&self.data.clone());
+                while let Ok(frame) = stream_decoder.decode() {
+                    // NOTE(`[]` indexing) all indices in `table` have already been
+                    // verified to exist in the `locs` map.
+                    let loc = locs.as_ref().map(|locs| &locs[&frame.index()]);
+
+                    self.messages.push(format!("{}", frame.display(false)));
+                    if let Some(loc) = loc {
+                        let relpath = if let Ok(relpath) =
+                            loc.file.strip_prefix(&std::env::current_dir().unwrap())
+                        {
+                            relpath
+                        } else {
+                            // not relative; use full path
+                            &loc.file
+                        };
+
+                        self.messages
+                            .push(format!("└─ {}:{}", relpath.display(), loc.line));
+                    }
+                }
             }
         };
     }

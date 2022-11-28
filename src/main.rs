@@ -610,8 +610,8 @@ fn main_try() -> Result<()> {
                     loop {
                         let mut session_handle = session.lock().unwrap();
                         let mut core = session_handle.core(0)?;
-                        app.poll_rtt(&mut core);
-                        app.render(&defmt_state);
+                        app.poll_rtt(&mut core, &defmt_state);
+                        app.render();
                         if app.handle_event(&mut core) {
                             logging::println("Shutting down.");
                             return Ok(());
