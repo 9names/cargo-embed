@@ -6,11 +6,11 @@ use crossterm::{
 };
 use probe_rs::Core;
 use probe_rs_rtt::RttChannel;
-use std::{fmt::write, path::PathBuf, sync::mpsc::RecvTimeoutError};
 use std::{
     io::{Read, Seek, Write},
     time::Duration,
 };
+use std::{path::PathBuf, sync::mpsc::RecvTimeoutError};
 use tui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
@@ -154,10 +154,7 @@ impl App {
         None
     }
 
-    pub fn render(
-        &mut self,
-        defmt_state: &Option<(defmt_decoder::Table, Option<defmt_decoder::Locations>)>,
-    ) {
+    pub fn render(&mut self) {
         let input = self.current_tab().input().to_owned();
         let has_down_channel = self.current_tab().has_down_channel();
         let scroll_offset = self.current_tab().scroll_offset();
@@ -171,77 +168,73 @@ impl App {
         let mut height = 0;
         let mut messages_wrapped: Vec<String> = Vec::new();
 
-        match tabs[current_tab].format() {
-            DataFormat::String | DataFormat::BinaryLE | DataFormat::Defmt => {
-                self.terminal
-                    .draw(|f| {
-                        let constraints = if has_down_channel {
-                            &[
-                                Constraint::Length(1),
-                                Constraint::Min(1),
-                                Constraint::Length(1),
-                            ][..]
-                        } else {
-                            &[Constraint::Length(1), Constraint::Min(1)][..]
-                        };
-                        let chunks = Layout::default()
-                            .direction(Direction::Vertical)
-                            .margin(0)
-                            .constraints(constraints)
-                            .split(f.size());
+        self.terminal
+            .draw(|f| {
+                let constraints = if has_down_channel {
+                    &[
+                        Constraint::Length(1),
+                        Constraint::Min(1),
+                        Constraint::Length(1),
+                    ][..]
+                } else {
+                    &[Constraint::Length(1), Constraint::Min(1)][..]
+                };
+                let chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .margin(0)
+                    .constraints(constraints)
+                    .split(f.size());
 
-                        let tab_names = tabs
-                            .iter()
-                            .map(|t| Spans::from(t.name()))
-                            .collect::<Vec<_>>();
-                        let tabs = Tabs::new(tab_names)
-                            .select(current_tab)
-                            .style(Style::default().fg(Color::Black).bg(Color::Yellow))
-                            .highlight_style(
-                                Style::default()
-                                    .fg(Color::Green)
-                                    .bg(Color::Yellow)
-                                    .add_modifier(Modifier::BOLD),
-                            );
-                        f.render_widget(tabs, chunks[0]);
+                let tab_names = tabs
+                    .iter()
+                    .map(|t| Spans::from(t.name()))
+                    .collect::<Vec<_>>();
+                let tabs = Tabs::new(tab_names)
+                    .select(current_tab)
+                    .style(Style::default().fg(Color::Black).bg(Color::Yellow))
+                    .highlight_style(
+                        Style::default()
+                            .fg(Color::Green)
+                            .bg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    );
+                f.render_widget(tabs, chunks[0]);
 
-                        height = chunks[1].height as usize;
+                height = chunks[1].height as usize;
 
-                        // We need to collect to generate message_num :(
-                        messages_wrapped = messages
-                            .iter()
-                            .flat_map(|m| textwrap::wrap(m, chunks[1].width as usize))
-                            .map(|s| s.into_owned())
-                            .collect();
-
-                        let message_num = messages_wrapped.len();
-
-                        let messages: Vec<ListItem> = messages_wrapped
-                            .iter()
-                            .skip(message_num - (height + scroll_offset).min(message_num))
-                            .take(height)
-                            .map(|s| ListItem::new(vec![Spans::from(Span::raw(s))]))
-                            .collect();
-
-                        let messages = List::new(messages.as_slice())
-                            .block(Block::default().borders(Borders::NONE));
-                        f.render_widget(messages, chunks[1]);
-
-                        if has_down_channel {
-                            let input = Paragraph::new(Spans::from(vec![Span::raw(input.clone())]))
-                                .style(Style::default().fg(Color::Yellow).bg(Color::Blue));
-                            f.render_widget(input, chunks[2]);
-                        }
-                    })
-                    .unwrap();
+                // We need to collect to generate message_num :(
+                messages_wrapped = messages
+                    .iter()
+                    .flat_map(|m| textwrap::wrap(m, chunks[1].width as usize))
+                    .map(|s| s.into_owned())
+                    .collect();
 
                 let message_num = messages_wrapped.len();
-                let scroll_offset = self.tabs[self.current_tab].scroll_offset();
-                if message_num < height + scroll_offset {
-                    self.current_tab_mut()
-                        .set_scroll_offset(message_num - height.min(message_num));
+
+                let messages: Vec<ListItem> = messages_wrapped
+                    .iter()
+                    .skip(message_num - (height + scroll_offset).min(message_num))
+                    .take(height)
+                    .map(|s| ListItem::new(vec![Spans::from(Span::raw(s))]))
+                    .collect();
+
+                let messages =
+                    List::new(messages.as_slice()).block(Block::default().borders(Borders::NONE));
+                f.render_widget(messages, chunks[1]);
+
+                if has_down_channel {
+                    let input = Paragraph::new(Spans::from(vec![Span::raw(input.clone())]))
+                        .style(Style::default().fg(Color::Yellow).bg(Color::Blue));
+                    f.render_widget(input, chunks[2]);
                 }
-            }
+            })
+            .unwrap();
+
+        let message_num = messages_wrapped.len();
+        let scroll_offset = self.tabs[self.current_tab].scroll_offset();
+        if message_num < height + scroll_offset {
+            self.current_tab_mut()
+                .set_scroll_offset(message_num - height.min(message_num));
         }
     }
 
